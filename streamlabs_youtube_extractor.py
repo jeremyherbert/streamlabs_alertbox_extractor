@@ -125,6 +125,9 @@ async def read_data(socket):
 
             printdim("%s:" % number, parsed_data)
 
+            with open(os.path.join(args['output'], args['msglog']), 'w') as f:
+                f.write(json.dumps({"data": parsed_data, "now": str(arrow.utcnow())}) + "\n")
+
             if 'pingInterval' in parsed_data:
                 printy("Updating ping interval to", parsed_data['pingInterval'])
                 ping_interval = int(parsed_data['pingInterval']) / 1000
@@ -172,8 +175,8 @@ if __name__ == "__main__":
                         help="The youtube url of the video")
     parser.add_argument('-l', '--log', default="log.txt",
                         help="A list of songs played and timestamps")
-    parser.add_argument('-p', '--port', default=56734,
-                        help="The port to listen on")
+    parser.add_argument('-m', '--msglog', default="msglog.txt",
+                        help="A list of all of the messages sent via streamlabs throughout the stream")
 
     args = vars(parser.parse_args())
 
@@ -181,7 +184,7 @@ if __name__ == "__main__":
         pass
 
     printy("Clearing files...")
-    for arg_file in ['titlefile', 'idfile', 'urlfile']:
+    for arg_file in ['titlefile', 'idfile', 'urlfile', 'msglog']:
         with open(os.path.join(args['output'], args[arg_file]), 'w') as f:
             f.write("")
 

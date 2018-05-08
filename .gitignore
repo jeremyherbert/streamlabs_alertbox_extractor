@@ -106,3 +106,6 @@ ENV/
 # pyinstaller
 build
 dist
+
+# junk
+.DS_Store
