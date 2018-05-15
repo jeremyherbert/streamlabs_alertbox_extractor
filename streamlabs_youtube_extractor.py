@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import websockets
 import json
@@ -6,10 +7,13 @@ import argparse
 import os
 import arrow
 import functools
+import sys
+import traceback
 
 from colorama import init, Fore, Style
 init()
 
+ENCODING = 'utf-8'
 
 def print_colour(colour, *args, **kwargs):
     print(colour, end='')
@@ -46,13 +50,13 @@ def write_youtube_data(video_id, title, offset_sec=0):
     youtube_url = "https://www.youtube.com/watch?v=" + video_id
     twitch_data = get_twitch_stream_data(args['streamer'], args['clientid'])
 
-    with open(os.path.join(args['output'], args['titlefile']), 'w') as f:
+    with open(os.path.join(args['output'], args['titlefile']), 'w', encoding=ENCODING) as f:
         f.write(title)
-    with open(os.path.join(args['output'], args['idfile']), 'w') as f:
+    with open(os.path.join(args['output'], args['idfile']), 'w', encoding=ENCODING) as f:
         f.write(video_id)
-    with open(os.path.join(args['output'], args['urlfile']), 'w') as f:
+    with open(os.path.join(args['output'], args['urlfile']), 'w', encoding=ENCODING) as f:
         f.write(youtube_url)
-    with open(os.path.join(args['output'], args['log']), 'a') as f:
+    with open(os.path.join(args['output'], args['log']), 'a', encoding=ENCODING) as f:
         if twitch_data is not None:
             start_time = arrow.get(twitch_data['started_at'])
             now_time = arrow.utcnow()
@@ -123,29 +127,32 @@ async def read_data(socket):
         if data:
             parsed_data = json.loads(data)
 
-            printdim("%s:" % number, parsed_data)
+            try:
+                #printdim("%s:" % number, parsed_data)
 
-            with open(os.path.join(args['output'], args['msglog']), 'w') as f:
-                f.write(json.dumps({"data": parsed_data, "now": str(arrow.utcnow())}) + "\n")
+                with open(os.path.join(args['output'], args['msglog']), 'a', encoding=ENCODING) as f:
+                    f.write(json.dumps({"data": parsed_data, "now": str(arrow.utcnow())}) + "\n\n")
 
-            if 'pingInterval' in parsed_data:
-                printy("Updating ping interval to", parsed_data['pingInterval'])
-                ping_interval = int(parsed_data['pingInterval']) / 1000
+                if 'pingInterval' in parsed_data:
+                    printy("Updating ping interval to", parsed_data['pingInterval'])
+                    ping_interval = int(parsed_data['pingInterval']) / 1000
 
-            # try:
-            if len(parsed_data) and type(parsed_data) is list and parsed_data[0] == "event":
-                event_data = parsed_data[1]
+                # try:
+                if len(parsed_data) and type(parsed_data) is list and parsed_data[0] == "event":
+                    event_data = parsed_data[1]
 
-                if event_data['type'] == 'alertPlaying' and event_data['message'].get('media'):
-                    media_data = event_data['message']['media']
+                    if event_data['type'] == 'alertPlaying' and event_data['message'].get('media'):
+                        media_data = event_data['message']['media']
 
-                    if media_data['type'] == 'youtube':
-                        video_time_offset = int(event_data['message']['duration']/1000)
-                        write_youtube_data(media_data['id'],
-                                           media_data['title'],
-                                           offset_sec=video_time_offset)
-                    else:
-                        raise RuntimeError("Unknown media type")
+                        if media_data['type'] == 'youtube':
+                            video_time_offset = int(event_data['message']['duration']/1000)
+                            write_youtube_data(media_data['id'],
+                                               media_data['title'],
+                                               offset_sec=video_time_offset)
+                        else:
+                            raise RuntimeError("Unknown media type")
+            except Exception as e:
+                traceback.print_exc(file=sys.stdout)
 
             else:
                 printy("skipping unknown message")
@@ -185,10 +192,10 @@ if __name__ == "__main__":
 
     printy("Clearing files...")
     for arg_file in ['titlefile', 'idfile', 'urlfile', 'msglog']:
-        with open(os.path.join(args['output'], args[arg_file]), 'w') as f:
+        with open(os.path.join(args['output'], args[arg_file]), 'w', encoding=ENCODING) as f:
             f.write("")
 
-    with open(os.path.join(args['output'], args['log']), 'a') as f:
+    with open(os.path.join(args['output'], args['log']), 'a', encoding=ENCODING) as f:
         f.write("\n\n")
         f.write("Restarted at: " + arrow.now().isoformat() + "\n")
 
