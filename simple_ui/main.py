@@ -176,7 +176,6 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         return True
 
     def _get_twitch_data(self):
-        return None
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
 
         try:
