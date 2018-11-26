@@ -45,9 +45,23 @@ class StreamlabsAPI(object):
     def launch(self):
         if self._thread is None or not self._thread.is_alive():
             self._launch_background_thread()
+            # self.read_from_msglog("/Users/jeremy/Downloads/msglog.txt")
 
     def get_websocket_data_blocking(self, timeout=None):
         return self._websocket_data.get(timeout=timeout)
+
+    def read_from_msglog(self, file_path):
+        with open(file_path, 'r') as f:
+            for line in f.readlines():
+                if line == "\n":
+                    continue
+                else:
+                    try:
+                        json_data = json.loads(line)
+                    except json.JSONDecodeError:
+                        print("failed to decode json")
+                        continue
+                    self._websocket_data.put(json_data)
 
     def _get_websocket_token(self):
         try:

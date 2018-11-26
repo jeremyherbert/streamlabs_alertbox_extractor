@@ -7,6 +7,7 @@ import traceback
 
 from PyQt5.QtWidgets import QApplication, QDialog, QMainWindow
 from PyQt5 import QtGui, QtWidgets, QtCore
+from PyQt5.QtCore import pyqtSignal, pyqtSlot
 from abc import ABC
 import arrow
 
@@ -36,6 +37,7 @@ def show_warn(text):
 
 class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
 
+    new_streamlabs_packet = pyqtSignal(list)
     blank_config = {
         "streamlabs_url": "",
         "twitch_client_id": "",
@@ -60,6 +62,8 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         self._load_config()
         self.btnConnect.clicked.connect(self._connect)
 
+        self.new_streamlabs_packet.connect(self._process_streamlabs_blob)
+
         self._streamlabs_api = streamlabs.StreamlabsAPI()
 
         self._connection_status_thread = threading.Thread(target=self._update_connection_status, daemon=True)
@@ -79,26 +83,84 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
             with open(os.path.join(file_path, "msglog.txt"), 'a', encoding=ENCODING) as f:
                 f.write(json.dumps(data) + "\n\n")
 
-            try:
-                if len(data) >= 2 and type(data) is list and data[0] == "event":
-                    event_data = data[1]
+            self.new_streamlabs_packet.emit(data)
 
-                    if event_data.get('type') == 'alertPlaying' and \
-                            event_data.get('message') and \
-                            event_data.get('message').get('media'):
+            # if len(data) >= 2 and type(data) is list and data[0] == "event":
+            #     event_data = data[1]
+            #     if event_data.get('type') == 'alertPlaying' and \
+            #             event_data.get('message'):
+            #         import time
+            #         time.sleep(1)
 
-                        media_data = event_data['message']['media']
+    @pyqtSlot(list)
+    def _process_streamlabs_blob(self, blob):
+        try:
+            if len(blob) >= 2 and type(blob) is list and blob[0] == "event":
+                event_data = blob[1]
 
-                        if media_data.get('type') == 'youtube' and \
-                                media_data.get('id') and \
-                                media_data.get('title') and \
-                                media_data.get('duration'):
-                            video_time_offset = int(event_data['message']['duration']/1000)
-                            self._write_youtube_data(media_data['id'],
-                                                     media_data['title'],
-                                                     offset_sec=video_time_offset)
-            except Exception as e:
-                traceback.print_exc()
+                if event_data.get('type') == 'alertPlaying' and \
+                        event_data.get('message'):
+
+
+                    if event_data['message'].get("type") == "donation":
+                        donation_data = event_data['message']
+                        self.txtDonationUsername.setText(donation_data.get("from"))
+                        self.txtDonationAmount.setText(event_data['message'].get("amount"))
+                        self.txtDonationMessage.setPlainText(donation_data.get("message"))
+
+                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
+                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+
+                        if event_data.get('message').get('media'):
+                            media_data = event_data['message']['media']
+
+                            if media_data.get('type') == 'youtube' and \
+                                    media_data.get('id') and \
+                                    media_data.get('title') and \
+                                    media_data.get('duration'):
+                                video_time_offset = int(event_data['message']['duration'] / 1000)
+                                self._write_youtube_data(media_data['id'],
+                                                         media_data['title'],
+                                                         offset_sec=video_time_offset)
+                            else:
+                                self.txtLastTimestamp.setText("")
+                                self.txtLastTitle.setText("N/A (no media shared)")
+                                self.txtLastUrl.setText("")
+                        else:
+                            self.txtLastTimestamp.setText("")
+                            self.txtLastTitle.setText("N/A (no media shared)")
+                            self.txtLastUrl.setText("")
+                    elif event_data['message'].get("type") == "bits":
+                        bits_data = event_data['message']
+
+                        self.txtCheerSubUsername.setText(bits_data.get("from"))
+                        self.txtCheerAmount.setText(bits_data.get("amount"))
+                        sub_message = bits_data.get('message')
+                        if sub_message:
+                            self.txtCheerSubMessage.setPlainText(sub_message)
+                        else:
+                            self.txtCheerSubMessage.setPlainText("")
+
+                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
+                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+
+                    elif event_data['message'].get("type") == "subscription":
+                        sub_data = event_data['message']
+
+                        self.txtCheerSubUsername.setText(sub_data.get("from"))
+                        self.txtCheerAmount.setText("N/A (subscriber)")
+                        sub_message = sub_data.get('message')
+                        if sub_message:
+                            self.txtCheerSubMessage.setPlainText(sub_message)
+                        else:
+                            self.txtCheerSubMessage.setPlainText("")
+
+                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
+                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+
+        except Exception as e:
+            traceback.print_exc()
+            raise
 
     def _check_twitch_client_id(self):
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
@@ -114,6 +176,7 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         return True
 
     def _get_twitch_data(self):
+        return None
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
 
         try:
@@ -187,7 +250,6 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
             self._streamlabs_api.disconnected_event.wait()
             self.lblStatus.setText("Disconnected")
             self.lblStatus.setStyleSheet("QLabel { color: red; }")
-            show_error("Streamlabs connection failed.")
             self._set_controls_disabled(False)
 
     def _write_default_config(self):
