@@ -11,13 +11,31 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot
 from abc import ABC
 import arrow
 
-from simple_ui import Ui_MainWindow
+from simple_ui_list import Ui_MainWindow
 import streamlabs
 
 
 file_path = os.path.dirname(os.path.realpath(__file__))
 ENCODING = 'utf-8'
 
+def seconds_to_hms(seconds: int):
+    tmp_seconds = seconds
+
+    hours = int(tmp_seconds / 3600)
+    tmp_seconds -= hours * 3600
+
+    mins = int(tmp_seconds / 60)
+    tmp_seconds -= mins * 60
+
+    output_string = ""
+    if hours:
+        output_string += "%ih" % hours
+    if mins:
+        output_string += "%sm" % str(mins).zfill(2)
+
+    output_string += "%ss" % str(int(tmp_seconds)).zfill(2)
+
+    return output_string
 
 def show_error(text):
     msg = QtWidgets.QMessageBox()
@@ -48,6 +66,10 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         super().__init__()
         self.setupUi(self)
 
+        self._donations = []
+        self._donation_timestamps = []
+        self._list_items = []
+
         self._config_path = os.path.join(file_path, "streamlabs_extractor_config.json")
 
         try:
@@ -62,7 +84,7 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         self._load_config()
         self.btnConnect.clicked.connect(self._connect)
 
-        self.new_streamlabs_packet.connect(self._process_streamlabs_blob)
+        self.new_streamlabs_packet.connect(self._parse_streamlabs_blob)
 
         self._streamlabs_api = streamlabs.StreamlabsAPI()
 
@@ -71,6 +93,18 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
 
         self._write_streamlabs_data_thread = threading.Thread(target=self._write_streamlabs_data_to_file, daemon=True)
         self._write_streamlabs_data_thread.start()
+
+        # item = QtWidgets.QListWidgetItem()
+        # self.listWidget.addItem(item)
+        #
+        # label = QtWidgets.QLabel()
+        # label.setWordWrap(True)
+        # label.setText("Started<br>hello<br><a href=\"https://google.com\">hi</a>")
+        #
+        # item.setSizeHint(label.sizeHint())
+        # self.listWidget.setItemWidget(item, label)
+        #
+        # self.listWidget.removeItemWidget(item)
 
     def _write_streamlabs_data_to_file(self):
         for name in ["msglog.txt", "title.txt", "id.txt", "url.txt"]:
@@ -85,6 +119,7 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
 
             self.new_streamlabs_packet.emit(data)
 
+            # testing only!
             # if len(data) >= 2 and type(data) is list and data[0] == "event":
             #     event_data = data[1]
             #     if event_data.get('type') == 'alertPlaying' and \
@@ -93,23 +128,36 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
             #         time.sleep(1)
 
     @pyqtSlot(list)
-    def _process_streamlabs_blob(self, blob):
+    def _parse_streamlabs_blob(self, blob):
         try:
             if len(blob) >= 2 and type(blob) is list and blob[0] == "event":
                 event_data = blob[1]
 
-                if event_data.get('type') == 'alertPlaying' and \
+                if event_data.get("type") == "donation" and type(event_data.get("message")) is list and \
+                        event_data['message'][0].get("_id") and event_data['message'][0].get("media") and \
+                        event_data['message'][0]['media'].get("duration"):
+
+                    self._donations.append(event_data['message'][0])
+                    self._donation_timestamps.append(arrow.now().timestamp)
+                    self._recompute_queue_length()
+
+                elif event_data.get('type') == 'alertPlaying' and \
                         event_data.get('message'):
 
+                    label_text = ""
+                    background_color = ""
 
                     if event_data['message'].get("type") == "donation":
                         donation_data = event_data['message']
-                        self.txtDonationUsername.setText(donation_data.get("from"))
-                        self.txtDonationAmount.setText(event_data['message'].get("amount"))
-                        self.txtDonationMessage.setPlainText(donation_data.get("message"))
+                        background_color = "#aaffc3"
 
-                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
-                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+                        label_text += "Donation (amount: %s)<br>" % event_data['message'].get("amount")
+
+                        if donation_data.get("message"):
+                            msg = donation_data["message"]
+                        else:
+                            msg = "<i>(no message)</i>"
+                        label_text += "From <b>%s</b>: %s<br><br>" % (donation_data.get("from"), msg)
 
                         if event_data.get('message').get('media'):
                             media_data = event_data['message']['media']
@@ -118,49 +166,94 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
                                     media_data.get('id') and \
                                     media_data.get('title') and \
                                     media_data.get('duration'):
-                                video_time_offset = int(event_data['message']['duration'] / 1000)
+                                duration = int(media_data['duration'] / 1000)
                                 self._write_youtube_data(media_data['id'],
                                                          media_data['title'],
-                                                         offset_sec=video_time_offset)
+                                                         offset_sec=duration)
+
+                                label_text += "Media (duration %s): <b>%s</b> - <a href=\"https://www.youtube.com/watch?v=%s\">%s</a>" % (seconds_to_hms(duration), media_data['title'], media_data['id'], media_data['id'])
+
+                                # check if this donation was in the queue
+                                found_index = -1
+                                for i, donation in enumerate(self._donations):
+                                    if donation['_id'] == donation_data['_id']:
+                                        found_index = i
+                                        break
+                                else:
+                                    pass
+
+                                if found_index != -1:
+                                    self.lblDonationDelay.setText("Donation to play delay: " + seconds_to_hms(arrow.now().timestamp - self._donation_timestamps[found_index]))
+
+                                    self._donations = self._donations[found_index+1:]
+                                    self._donation_timestamps = self._donation_timestamps[found_index + 1:]
+                                    self._recompute_queue_length()
+                                else:
+                                    print("missing from index")
+
+
+
                             else:
-                                self.txtLastTimestamp.setText("")
-                                self.txtLastTitle.setText("N/A (no media shared)")
-                                self.txtLastUrl.setText("")
+                                label_text += "Media: <i>(no media)</i>"
                         else:
-                            self.txtLastTimestamp.setText("")
-                            self.txtLastTitle.setText("N/A (no media shared)")
-                            self.txtLastUrl.setText("")
+                            label_text += "Media: <i>(no media)</i>"
+
                     elif event_data['message'].get("type") == "bits":
                         bits_data = event_data['message']
+                        background_color = "#c3aaff"
 
-                        self.txtCheerSubUsername.setText(bits_data.get("from"))
-                        self.txtCheerAmount.setText(bits_data.get("amount"))
-                        sub_message = bits_data.get('message')
-                        if sub_message:
-                            self.txtCheerSubMessage.setPlainText(sub_message)
+                        label_text += "Cheer (amount: %s)<br>" % bits_data.get("amount")
+                        if bits_data.get("message"):
+                            msg = bits_data["message"]
                         else:
-                            self.txtCheerSubMessage.setPlainText("")
-
-                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
-                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+                            msg = "<i>(no message)</i>"
+                        label_text += "From <b>%s</b>: %s" % (bits_data.get("from"), msg)
 
                     elif event_data['message'].get("type") == "subscription":
                         sub_data = event_data['message']
+                        background_color = "#ffc3aa"
 
-                        self.txtCheerSubUsername.setText(sub_data.get("from"))
-                        self.txtCheerAmount.setText("N/A (subscriber)")
-                        sub_message = sub_data.get('message')
-                        if sub_message:
-                            self.txtCheerSubMessage.setPlainText(sub_message)
+                        label_text += "Subscription (months: %s)<br>" % sub_data.get("months")
+                        if sub_data.get("message"):
+                            msg = sub_data["message"]
                         else:
-                            self.txtCheerSubMessage.setPlainText("")
+                            msg = "<i>(no message)</i>"
+                        label_text += "From <b>%s</b>: %s" % (sub_data.get("from"), msg)
 
-                        self.txtDonationMessage.setStyleSheet("QPlainTextEdit {background-color: none; }")
-                        self.txtCheerSubMessage.setStyleSheet("QPlainTextEdit {background-color: #aaffc3; }")
+                        print(len(sub_data.get("message")))
+
+                    if label_text != "":
+                        # add a blank item
+                        self._list_items.append(QtWidgets.QListWidgetItem())
+                        self.listWidget.addItem(self._list_items[-1])
+
+                        # add the real item
+
+                        new_label = QtWidgets.QLabel()
+                        new_label.setText(label_text)
+                        new_label.setWordWrap(True)
+                        new_label.setStyleSheet("QLabel { background-color: %s; }" % background_color)
+
+                        self._list_items.append(QtWidgets.QListWidgetItem())
+
+                        self.listWidget.addItem(self._list_items[-1])
+                        self.listWidget.setItemWidget(self._list_items[-1], new_label)
+
+                        self._list_items[-1].setSizeHint(new_label.size())
+
+                        self.listWidget.scrollToBottom()
 
         except Exception as e:
             traceback.print_exc()
             raise
+
+    def _recompute_queue_length(self):
+        time_ms = 0
+        for donation in self._donations:
+            if donation.get("media") and donation['media'].get("duration"):
+                time_ms += int(donation['media']['duration'])
+
+        self.lblTimeRemaining.setText("Time Remaining: %s" % seconds_to_hms(int(time_ms/1000)))
 
     def _check_twitch_client_id(self):
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
@@ -176,6 +269,7 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
         return True
 
     def _get_twitch_data(self):
+        # return None
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
 
         try:
@@ -234,10 +328,6 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
             )
 
             f.write(songdata)
-
-            self.txtLastTimestamp.setText("%s:%s:%s" % (str(hours).zfill(2), str(mins).zfill(2), str(sec).zfill(2)))
-            self.txtLastTitle.setText(title)
-            self.txtLastUrl.setText(youtube_url)
 
     def _update_connection_status(self):
         while 1:
@@ -334,7 +424,6 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
                       "work until the stream begins." % self.txtUsername.text())
 
         self._streamlabs_api.launch()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
