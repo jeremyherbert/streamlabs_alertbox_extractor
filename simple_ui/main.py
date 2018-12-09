@@ -191,14 +191,15 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
                                 else:
                                     print("missing from index")
 
-
-
                             else:
+                                self._clear_youtube_data()
                                 label_text += "Media: <i>(no media)</i>"
                         else:
+                            self._clear_youtube_data()
                             label_text += "Media: <i>(no media)</i>"
 
                     elif event_data['message'].get("type") == "bits":
+                        self._clear_youtube_data()
                         bits_data = event_data['message']
                         background_color = "#c3aaff"
 
@@ -210,6 +211,7 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
                         label_text += "From <b>%s</b>: %s" % (bits_data.get("from"), msg)
 
                     elif event_data['message'].get("type") == "subscription":
+                        self._clear_youtube_data()
                         sub_data = event_data['message']
                         background_color = "#ffc3aa"
 
@@ -255,6 +257,9 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
 
         self.lblTimeRemaining.setText("Time Remaining: %s" % seconds_to_hms(int(time_ms/1000)))
 
+        with open(os.path.join(file_path, "queue_length_estimate.txt"), 'w') as f:
+            f.write(seconds_to_hms(int(time_ms/1000)))
+
     def _check_twitch_client_id(self):
         url = "https://api.twitch.tv/helix/streams?user_login=" + self.txtUsername.text()
 
@@ -289,6 +294,14 @@ class StreamlabsExtractor(QMainWindow, Ui_MainWindow):
             return None
         else:
             return data[0]
+
+    def _clear_youtube_data(self):
+        with open(os.path.join(file_path, "title.txt"), 'w', encoding=ENCODING) as f:
+            f.write(' ')
+        with open(os.path.join(file_path, "id.txt"), 'w', encoding=ENCODING) as f:
+            f.write(' ')
+        with open(os.path.join(file_path, "url.txt"), 'w', encoding=ENCODING) as f:
+            f.write(' ')
 
     def _write_youtube_data(self, video_id, title, offset_sec):
         twitch_data = self._get_twitch_data()
